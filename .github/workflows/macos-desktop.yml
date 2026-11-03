@@ -1,0 +1,70 @@
+name: macOS desktop
+on:
+  workflow_dispatch:
+  push:
+    branches: [macos-desktop]
+    paths: ["desktop/**", "server/**", "web/**", ".github/workflows/macos-desktop.yml"]
+  pull_request:
+    paths: ["desktop/**", "server/**", "web/**", ".github/workflows/macos-desktop.yml"]
+permissions:
+  contents: read
+# A branch push and its PR need only one build; retire superseded queues.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Verify native runner
+        run: node -e "if(process.arch !== '${{ matrix.arch }}') process.exit(1)"
+      - run: npm ci --no-audit
+        working-directory: server
+      - run: npm ci --no-audit
+        working-directory: web
+      - run: npm ci --no-audit
+        working-directory: desktop
+      - name: Backend checks
+        working-directory: server
+        run: |
+          npm run typecheck
+          npx vitest run test/helpers-project.test.ts test/session-registry.test.ts
+      - name: Stage Mac tools
+        run: node desktop/scripts/fetch-externals.mjs
+      - name: Desktop tests
+        working-directory: desktop
+        run: npm test
+      - name: Build ad-hoc signed app, DMG and ZIP
+        working-directory: desktop
+        env:
+          # dist:mac explicitly uses identity "-"; no signing secrets are used.
+          # electron-builder otherwise skips even ad-hoc signing on PR builds.
+          CSC_FOR_PULL_REQUEST: "true"
+        run: npm run dist:mac
+      - name: Verify packaged chat creation
+        run: node desktop/scripts/verify-runtime-session.mjs dist/mac*/Kady.app/Contents/Resources/runtime
+      - name: Verify bundle signature
+        run: codesign --verify --deep --strict dist/mac*/Kady.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Kady-mac-${{ matrix.arch }}
+          path: |
+            dist/Kady-*-mac-*.dmg
+            dist/Kady-*-mac-*.zip
+          if-no-files-found: error

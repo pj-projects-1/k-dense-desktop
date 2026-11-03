@@ -23,6 +23,20 @@ if (!fs.existsSync(externals)) {
   process.exit(1);
 }
 
+if (process.platform === "darwin") {
+  const uv = path.join(externals, "uv", "uv");
+  const env = { PATH: `${path.join(externals, "bin")}:${path.dirname(uv)}:/usr/bin:/bin:/usr/sbin:/sbin`, KADY_NODE_EXECUTABLE: process.execPath };
+  for (const [command, args] of [[uv, ["--version"]], ["/bin/bash", ["-c", 'git --version && node -e "console.log(process.arch)"']]]) {
+    const result = spawnSync(command, args, { env, stdio: "inherit", timeout: 10000 });
+    if (result.status !== 0) throw new Error(`macOS runtime check failed: ${command}`);
+  }
+  const result = spawnSync("/usr/bin/file", [uv], { encoding: "utf8" });
+  const architecture = process.arch === "arm64" ? "arm64" : "x86_64";
+  if (!result.stdout.includes(architecture)) throw new Error(`Wrong uv architecture: ${result.stdout}`);
+  console.log("macOS uv, Node launcher, system Bash and Apple Git checks passed.");
+  process.exit(0);
+}
+
 const gitRoot = path.join(externals, "git");
 const bash = path.join(gitRoot, "usr", "bin", "bash.exe");
 const uvExe = path.join(externals, "uv", "uv.exe");

@@ -1,5 +1,7 @@
 # K-Dense BYOK Desktop
 
+**macOS fork:** See [Mac installation and build instructions](desktop/MACOS.md). Apple Silicon and Intel build targets are separate; consult the build report for tested coverage.
+
 [English](README.en.md) | [简体中文](README.md)
 
 Packages the two local services of [K-Dense BYOK](https://github.com/K-Dense-AI/k-dense-byok) into a single Windows desktop app. The installer bundles bash, git, uv and every Node dependency, so users install no runtime of their own.
@@ -122,7 +124,8 @@ Design notes, known gaps and how to add a translation are in [web/docs/i18n.md](
 - **Auto-update**: upstream releases ship no binaries, so a version endpoint has to be built
 - **First-launch Python environment**: `uv sync` builds two venvs (sandbox + preview helper); it takes several minutes and needs network
 - **Skill library network dependency**: the `skills` CLI re-clones the upstream repo (460 MB) on every sync, and reports `SSL/TLS handshake` or `invalid index-pack output` when the network is unstable. System Git fails the same way with the same command, so this is not the bundled build's fault. Fetched caches land in `%TEMP%/kady-desk-skills/`, but the CLI does not reuse them
-- **macOS / Linux**: configuration exists, unverified; no `externals` bundle (relies on the system bash)
+- **macOS**: this fork adds native packaging and bundled uv; see [macOS instructions](desktop/MACOS.md) for requirements and validation limits.
+- **Linux**: configuration remains unverified; relies on system bash, git and uv.
 
 ## License
 

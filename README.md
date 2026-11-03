@@ -1,5 +1,7 @@
 # K-Dense BYOK 桌面版
 
+**macOS fork:** See [Mac installation and build instructions](desktop/MACOS.md). Apple Silicon and Intel build targets are separate; consult the build report for tested coverage.
+
 [简体中文](README.md) | [English](README.en.md)
 
 把 [K-Dense BYOK](https://github.com/K-Dense-AI/k-dense-byok) 的两个本地服务装进一个 Windows 桌面应用。安装包自带 bash、git、uv 和全部 Node 依赖，用户不需要装任何运行时。

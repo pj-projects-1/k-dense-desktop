@@ -29,7 +29,7 @@ import { registerSkillRoutes } from "./api/skills.ts";
 import { registerPromptRoutes } from "./api/prompts.ts";
 import { registerAutomationRoutes } from "./api/automation.ts";
 import { setScheduleActivityListener } from "./agent/subagent-bridge.ts";
-import { bootSchedulerSessions, configureScheduler, onScheduleActivity, startSchedulerTick } from "./agent/scheduler.ts";
+import { bootSchedulerSessions, configureScheduler, onScheduleActivity, startSchedulerTick, stopSchedulerTick } from "./agent/scheduler.ts";
 import { registerSystemRoutes } from "./api/system.ts";
 import { registerMcpRoutes } from "./api/mcp.ts";
 import { registerCredentialRoutes } from "./api/credentials.ts";
@@ -38,7 +38,7 @@ import { registerAgentRoutes } from "./api/agents.ts";
 import { registerSpeechRoutes } from "./api/speech.ts";
 import { registerModalRoutes } from "./api/modal.ts";
 import { registerModelProviderRoutes } from "./api/model-providers.ts";
-import { setSessionObserver } from "./agent/session-registry.ts";
+import { setSessionObserver, shutdownLiveSessions } from "./agent/session-registry.ts";
 import { attachSessionObserver } from "./agent/session-observer.ts";
 import { registerNextExperimentRoutes } from "./api/next-experiments.ts";
 import { registerEvidencePackageRoutes } from "./api/evidence-packages.ts";
@@ -277,6 +277,25 @@ if (isMain) {
       app.log.warn({ status, venv: HELPERS_VENV_DIR }, "helper venv sync failed");
   });
   const app = await buildApp();
+  let stopping = false;
+  const shutdown = async () => {
+    if (stopping) return;
+    stopping = true;
+    stopSchedulerTick();
+    // Keep within the desktop parent's five-second shutdown deadline.
+    const deadline = setTimeout(() => process.exit(1), 4000);
+    deadline.unref();
+    try {
+      await shutdownLiveSessions();
+      await app.close();
+      process.exit(0);
+    } catch (error) {
+      app.log.error(error, "shutdown failed");
+      process.exit(1);
+    }
+  };
+  process.once("SIGTERM", () => void shutdown());
+  process.once("SIGINT", () => void shutdown());
   // Durable pi-subagents schedules fire from a resident session per project;
   // open those hosts now and keep the budget hold reconciled (not in
   // buildApp: tests must not open Pi sessions).

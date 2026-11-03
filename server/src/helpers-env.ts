@@ -34,6 +34,20 @@ export const HELPERS_VENV_DIR = path.resolve(
   process.env.KADY_HELPERS_VENV?.trim() || path.join(HELPERS_DIR, ".venv"),
 );
 
+/** uv may update its lock/project files; signed app resources are read-only. */
+export function helperProjectDirectory(): string {
+  const override = process.env.KADY_HELPERS_PROJECT_DIR?.trim();
+  if (!override) return HELPERS_DIR;
+  const destination = path.resolve(override);
+  if (destination === HELPERS_DIR) return HELPERS_DIR;
+  fs.mkdirSync(destination, { recursive: true });
+  for (const name of ["pyproject.toml", "uv.lock"]) {
+    const source = path.join(HELPERS_DIR, name);
+    fs.copyFileSync(source, path.join(destination, name));
+  }
+  return destination;
+}
+
 function venvPythonPath(): string {
   return process.platform === "win32"
     ? path.join(HELPERS_VENV_DIR, "Scripts", "python.exe")
@@ -114,8 +128,15 @@ export function syncHelperVenvAsync(): Promise<number | null> {
     } catch {
       // A read-only data root still lets the sync fail loudly on its own terms.
     }
-    const child = spawn(uv, ["sync"], {
-      cwd: HELPERS_DIR,
+    let projectDir: string;
+    try { projectDir = helperProjectDirectory(); } catch (error) {
+      helperState.state = "failed";
+      helperState.detail = String(error);
+      resolve(null);
+      return;
+    }
+    const child = spawn(uv, ["sync", "--frozen", "--python", "3.12"], {
+      cwd: projectDir,
       stdio: "ignore",
       env: uvSyncEnv(),
     });
@@ -145,8 +166,8 @@ function runUvSync() {
   const uv = findUv();
   if (!uv) return null;
   fs.mkdirSync(path.dirname(HELPERS_VENV_DIR), { recursive: true });
-  return spawnSync(uv, ["sync"], {
-    cwd: HELPERS_DIR,
+  return spawnSync(uv, ["sync", "--frozen", "--python", "3.12"], {
+    cwd: helperProjectDirectory(),
     stdio: "ignore",
     timeout: 15 * 60 * 1000,
     env: uvSyncEnv(),

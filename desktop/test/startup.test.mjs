@@ -12,6 +12,8 @@ import http from "node:http";
 import path from "node:path";
 import { after, before, describe, it } from "node:test";
 
+import { BACKEND_PORT } from "../service-manager.mjs";
+
 const repoRoot = path.resolve(import.meta.dirname, "..", "..");
 
 /** An HTTP server that answers /health the way a *different* Kady would. */
@@ -54,7 +56,7 @@ describe("startServices with the backend port already taken", () => {
   before(async () => {
     // If something already owns 8000 (a dev server, a running Kady) that is
     // exactly the situation under test, so use it. Otherwise stand one up.
-    impostor = await startImpostor(8000).catch(() => null);
+    impostor = await startImpostor(BACKEND_PORT).catch(() => null);
   });
 
   after(async () => {
@@ -72,8 +74,8 @@ describe("startServices with the backend port already taken", () => {
     });
 
     assert.equal(result.ok, false);
-    assert.match(result.detail, /8000/);
-    assert.match(result.detail, /netstat/);
+    assert.ok(result.detail.includes(String(BACKEND_PORT)));
+    assert.match(result.detail, process.platform === "win32" ? /netstat/ : /lsof/);
     assert.doesNotMatch(result.detail, /did not become ready/);
   });
 });

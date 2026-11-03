@@ -8,6 +8,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { runtimeEnvironment, runnable, executable } from "./runtime-env.mjs";
 
 /**
  * @param {object} options
@@ -35,6 +36,16 @@ export function checkRuntime({ externalsDir } = {}) {
         );
       }
     }
+  }
+
+  if (process.platform === "darwin") {
+    const env = runtimeEnvironment({ externalsDir });
+    if (!executable("/bin/bash")) blocking.push("The system Bash shell (/bin/bash) is unavailable.");
+    if (!runnable("git", env)) {
+      blocking.push("Git is required. Install Apple Command Line Tools with `xcode-select --install` in Terminal, or install Git with Homebrew, then reopen Kady.");
+    }
+    if (!runnable("uv", env)) warnings.push("uv could not run. Reinstall Kady to restore its bundled Python environment manager.");
+    return { blocking, warnings };
   }
 
   const uvBundled =

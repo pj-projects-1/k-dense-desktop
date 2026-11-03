@@ -599,3 +599,16 @@ export async function disposeProjectSessions(projectId: string): Promise<void> {
   const sessions = [...live.entries()].filter(([key]) => key.startsWith(prefix));
   await Promise.all(sessions.map(([key, session]) => release(projectId, key, session)));
 }
+
+/** Abort tools before process exit: Pi Bash commands own detached process groups. */
+export async function shutdownLiveSessions(): Promise<void> {
+  const sessions = [...live.entries()];
+  await Promise.allSettled(sessions.map(async ([, session]) => {
+    session.clearQueue();
+    session.abortBash();
+    await session.abort();
+  }));
+  await Promise.allSettled(sessions.map(([key, session]) =>
+    release(key.slice(0, key.indexOf(":")), key, session),
+  ));
+}

@@ -17,6 +17,7 @@ import process from "node:process";
 
 import { BACKEND_URL, UI_URL, packagedArtifacts, setFatalHandler, startServices, stopServices } from "./service-manager.mjs";
 import { checkRuntime } from "./preflight.mjs";
+import { runtimeEnvironment } from "./runtime-env.mjs";
 
 const isDev = !app.isPackaged;
 
@@ -24,6 +25,11 @@ const isDev = !app.isPackaged;
 // "kady-desktop" while the product is "Kady". Pin the name so a packaged app
 // and a checkout agree on where user data lives.
 app.setName("Kady");
+if (process.env.KADY_DESKTOP_USER_DATA) {
+  const userData = path.resolve(process.env.KADY_DESKTOP_USER_DATA);
+  fs.mkdirSync(userData, { recursive: true });
+  app.setPath("userData", userData);
+}
 
 /** Keep one window; re-focusing the dock/taskbar icon should not spawn more. */
 let mainWindow = null;
@@ -38,7 +44,7 @@ let servicesStarted = false;
  * upgrade. Electron gives us the right per-user location per platform.
  */
 function dataRoot() {
-  return path.join(app.getPath("userData"), "data");
+  return process.env.KADY_DATA_ROOT ? path.resolve(process.env.KADY_DATA_ROOT) : path.join(app.getPath("userData"), "data");
 }
 
 /**
@@ -202,11 +208,14 @@ function runtimeArtifacts() {
  * reveals it, the platform convention on Windows and Linux.
  */
 function buildApplicationMenu() {
+  const quitItem = { label: "Quit Kady", accelerator: "CmdOrCtrl+Q", click: () => void quitApp() };
   const template = [
-    {
-      label: "File",
-      submenu: [{ role: "quit", label: "Quit" }],
-    },
+    ...(process.platform === "darwin" ? [{
+      label: app.name,
+      submenu: [{ role: "about" }, { type: "separator" }, { role: "services" },
+        { type: "separator" }, { role: "hide" }, { role: "hideOthers" },
+        { role: "unhide" }, { type: "separator" }, quitItem],
+    }] : [{ label: "File", submenu: [quitItem] }]),
     {
       label: "Edit",
       submenu: [
@@ -400,6 +409,7 @@ async function bootServices() {
 
   // Fail on a missing shell before any window opens: without one, every agent
   // tool call fails with an error the user cannot act on.
+  Object.assign(process.env, runtimeEnvironment(artifacts));
   const { blocking, warnings } = checkRuntime(artifacts);
   if (blocking.length) {
     await dialog.showMessageBox({
@@ -408,8 +418,7 @@ async function bootServices() {
       message: "A required component is missing.",
       detail: blocking.join("\n\n"),
     });
-    quitting = true;
-    app.quit();
+    await quitApp({ force: true });
     return { ok: false, detail: blocking.join("\n\n") };
   }
   if (warnings.length) {
@@ -468,7 +477,7 @@ async function boot() {
         (isDev
           ? "Check the terminal output for the failing service. If dependencies are missing, " +
             "run `npm install` in server/ and web/, then try again."
-          : "Check that no other program is using ports 3000 or 8000, then restart the app."),
+          : `Check that no other program is using ${UI_URL} or ${BACKEND_URL}, then restart the app.`),
     });
     app.quit();
     return;
@@ -528,9 +537,10 @@ if (!app.requestSingleInstanceLock()) {
     ensureTrayHint();
   });
 
-  app.on("before-quit", () => {
-    quitting = true;
-    void stopServices();
+  app.on("before-quit", (event) => {
+    if (quitting) return;
+    event.preventDefault();
+    void quitApp();
   });
 
   // macOS: the dock icon brings the window back instead of quitting.
@@ -641,7 +651,7 @@ function ensureTrayHint() {
   const s = readShellSettings();
   if (s.trayHintShown) return;
   const t = createTray();
-  if (t && typeof t.displayBalloon === "function") {
+  if (process.platform === "win32" && t && typeof t.displayBalloon === "function") {
     t.displayBalloon({
       title: "K-Dense BYOK is still running",
       content: "Right-click the tray icon to reopen the window or quit.",

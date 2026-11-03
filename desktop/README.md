@@ -150,7 +150,8 @@ PortableGit 2.56 把工具链从 `mingw64/` 移到了 `ucrt64/`；脚本按存�
 - **自动更新**：上游 release 无二进制产物，需自建版本端点（参考 DSH Desktop 的做法）
 - **首次启动的 Python 环境**：`uv sync` 会构建两个 venv（沙箱 + 预览 helper），耗时数分钟且需联网
 - **技能库的网络依赖**：`skills` CLI 每次同步都重新 `git clone` 上游仓库（460 MB），网络不稳时会报 `SSL/TLS handshake` 或 `invalid index-pack output`。系统 Git 用同样命令也会失败，不是捆绑版的问题。已抓取过的缓存落在 `%TEMP%/kady-desk-skills/`，但 CLI 不复用它
-- **macOS / Linux**：配置已写，未验证；无 `externals` 捆绑（依赖系统 bash）
+- **macOS**：本分支提供原生打包与 uv，详见 [macOS 说明](MACOS.md)。
+- **Linux**：配置未验证；依赖系统 bash、git 和 uv。
 
 ## 与 DSH Desktop 的对照
 

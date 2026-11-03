@@ -1,6 +1,6 @@
 {
   "name": "kady-desktop",
-  "version": "0.15.0d2",
+  "version": "0.15.0-mac.2",
   "private": true,
   "type": "module",
   "description": "Electron desktop shell for K-Dense BYOK",
@@ -10,7 +10,11 @@
     "build:runtime": "node scripts/build-runtime.mjs",
     "build:externals": "node scripts/fetch-externals.mjs",
     "build:icon": "node scripts/make-icon.mjs",
-    "dist": "npm run build:icon && npm run build:runtime && npm run build:externals && electron-builder --config electron-builder.json --win"
+    "dist": "npm run build:icon && npm run build:runtime && npm run build:externals && electron-builder --config electron-builder.json --win",
+    "dist:mac": "npm run build:web && npm run build:icon && npm run build:runtime && node scripts/verify-runtime-session.mjs && npm run build:externals && node scripts/verify-externals.mjs && electron-builder --config electron-builder.json --mac -c.mac.identity=- -c.mac.entitlements=resources/entitlements.mac.adhoc.plist -c.mac.entitlementsInherit=resources/entitlements.mac.adhoc.plist -c.mac.timestamp=none --publish never",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "build:web": "node scripts/build-web.mjs",
+    "dist:mac:signed": "npm run build:web && npm run build:icon && npm run build:runtime && node scripts/verify-runtime-session.mjs && npm run build:externals && node scripts/verify-externals.mjs && electron-builder --config electron-builder.json --mac --publish never"
   },
   "devDependencies": {
     "electron": "^45.2.1",

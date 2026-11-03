@@ -19,13 +19,16 @@ import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import process from "node:process";
+import { runtimeEnvironment, portHelp } from "./runtime-env.mjs";
 
-export const BACKEND_PORT = 8000;
-export const FRONTEND_PORT = 3000;
+export const BACKEND_PORT = process.platform === "darwin" ? 47821 : 8000;
+export const FRONTEND_PORT = process.platform === "darwin" ? 47822 : 3000;
 export const UI_URL = `http://127.0.0.1:${FRONTEND_PORT}`;
 export const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`;
 
 const children = new Set();
+// Keep group ownership even if a service leader crashes before app shutdown.
+const processGroups = new Set();
 let shuttingDown = false;
 let fatalHandler = null;
 
@@ -83,8 +86,10 @@ function spawnService(label, file, args, cwd, env) {
     env: nodeEnv(env),
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
+    detached: process.platform !== "win32",
   });
   children.add(child);
+  if (process.platform !== "win32" && child.pid) processGroups.add(child.pid);
 
   const forward = (stream, sink) => {
     stream.setEncoding("utf8");
@@ -99,6 +104,11 @@ function spawnService(label, file, args, cwd, env) {
   });
   child.once("exit", (code, signal) => {
     children.delete(child);
+    if (!shuttingDown && process.platform !== "win32" && child.pid) {
+      // Retire a crashed leader's group immediately, before its ID can be reused.
+      try { process.kill(-child.pid, "SIGKILL"); } catch { /* group exited */ }
+      processGroups.delete(child.pid);
+    }
     if (!shuttingDown) {
       console.error(`[${label}] exited (code=${code} signal=${signal})`);
       // During startup this is the difference between "the window opens onto a
@@ -146,6 +156,11 @@ function portInUse(port) {
  */
 function commonEnv(dataRoot, modelsCatalogue, externalsDir) {
   const env = {
+    ...runtimeEnvironment({ externalsDir }),
+    KADY_NODE_EXECUTABLE: process.execPath,
+    KADY_HOST: "127.0.0.1",
+    HOSTNAME: "127.0.0.1",
+    PORT: String(FRONTEND_PORT),
     KADY_DATA_ROOT: dataRoot,
     KADY_PORT: String(BACKEND_PORT),
     KADY_FRONTEND_PORT: String(FRONTEND_PORT),
@@ -154,10 +169,11 @@ function commonEnv(dataRoot, modelsCatalogue, externalsDir) {
     // it: NSIS replaces the install directory wholesale. Keep it in the data
     // root, which survives upgrades and is already the user's writable area.
     KADY_HELPERS_VENV: path.join(dataRoot, "python", "helpers"),
+    KADY_HELPERS_PROJECT_DIR: path.join(dataRoot, "python", "helper-project"),
   };
   if (modelsCatalogue) env.KADY_MODELS_CATALOGUE = modelsCatalogue;
 
-  if (externalsDir) {
+  if (externalsDir && process.platform === "win32") {
     const gitRoot = path.join(externalsDir, "git");
     // PortableGit 2.56 ships the toolchain as ucrt64/; older archives use
     // mingw64/. Both put the real git.exe there and a shim under cmd/.
@@ -380,10 +396,7 @@ export async function startServices({
       `service could not start.\n\n` +
       `This is usually another copy of Kady, a development server, or a ` +
       `program left running in the background. Close it and start Kady again.\n\n` +
-      `To find the program: open Command Prompt and run\n` +
-      busy.map((p) => `    netstat -ano | findstr :${p}`).join("\n") +
-      `\n\nThe last column is the process ID; match it in Task Manager's ` +
-      `Details tab.`;
+      portHelp(busy);
     console.error(`[startup] ${ports} already in use`);
     return { ok: false, detail };
   }
@@ -426,9 +439,7 @@ function describeStartupProblem(problem) {
     return (
       `Port ${BACKEND_PORT} was answered by a program Kady did not start, so ` +
       `the window would have shown someone else's data.\n\n` +
-      `Close the other program and start Kady again. To find it, run\n` +
-      `    netstat -ano | findstr :${BACKEND_PORT}\n` +
-      `in Command Prompt and match the last column in Task Manager's Details tab.`
+      portHelp([BACKEND_PORT])
     );
   }
   const why = problem.message ?? `exit code ${problem.code}`;
@@ -444,6 +455,9 @@ export async function stopServices() {
   shuttingDown = true;
 
   const alive = [...children];
+  for (const pid of processGroups) {
+    try { process.kill(-pid, "SIGTERM"); } catch { /* group exited */ }
+  }
   for (const child of alive) {
     try {
       if (process.platform === "win32") {
@@ -451,8 +465,6 @@ export async function stopServices() {
           stdio: "ignore",
           windowsHide: true,
         });
-      } else {
-        child.kill("SIGTERM");
       }
     } catch {
       /* already gone */
@@ -461,6 +473,16 @@ export async function stopServices() {
   const done = Promise.all(
     alive.map((c) => new Promise((r) => (c.exitCode !== null ? r() : c.once("exit", r)))),
   );
-  await Promise.race([done, new Promise((r) => setTimeout(r, 5000))]);
+  let deadline;
+  await Promise.race([done, new Promise((r) => { deadline = setTimeout(r, 5000); })]);
+  clearTimeout(deadline);
+  // Descendants can outlive a service leader; kill the isolated group even
+  // after the leader exits. Never target the desktop process group.
+  if (process.platform !== "win32") {
+    for (const pid of processGroups) {
+      try { process.kill(-pid, "SIGKILL"); } catch { /* group exited */ }
+    }
+  }
   children.clear();
+  processGroups.clear();
 }

@@ -84,3 +84,7 @@ AGENTS.md
 CLAUDE.md
 # Local scratch work (demo videos, concepts)
 /work/
+
+desktop/resources/icon.icns
+desktop/resources/icon.iconset/
+desktop/test/.tmp-data/

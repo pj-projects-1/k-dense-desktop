@@ -2,7 +2,7 @@ import fs from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { ensureProjectExists } from "../src/projects.ts";
-import { SHUTDOWN_GRACE_MS, disposeProjectSessions, getSession } from "../src/agent/session-registry.ts";
+import { SHUTDOWN_GRACE_MS, disposeProjectSessions, getSession, shutdownLiveSessions } from "../src/agent/session-registry.ts";
 import { subagentHost } from "../src/agent/subagent-control.ts";
 
 const projectId = "session-registry";
@@ -83,3 +83,24 @@ describe("session release", () => {
     }
   }, 30_000);
 });
+
+it.skipIf(process.platform === "win32")("shutdown aborts real Pi detached shell commands before disposing sessions", async () => {
+  const { paths, sessionId } = savedSession();
+  const session = (await getSession(projectId, paths, sessionId))!;
+  const pidFile = `${paths.sandbox}/shutdown-child.pid`;
+  const running = session.executeBash(`echo $$ > '${pidFile.replaceAll("'", "'\\''")}'; exec sleep 60`);
+  let pid: number | undefined;
+  try {
+    await vi.waitFor(() => expect(fs.existsSync(pidFile)).toBe(true), { timeout: 5000 });
+    pid = Number(fs.readFileSync(pidFile, "utf8").trim());
+    process.kill(pid, 0);
+    await shutdownLiveSessions();
+    await running;
+    await vi.waitFor(() => expect(() => process.kill(pid!, 0)).toThrow(), { timeout: 2000 });
+    expect(fs.existsSync(paths.sessionsDir)).toBe(true);
+  } finally {
+    session.abortBash();
+    await running.catch(() => {});
+    if (pid) { try { process.kill(-pid, "SIGKILL"); } catch {} }
+  }
+}, 30000);

@@ -9,6 +9,7 @@
  * Usage: node scripts/make-icon.mjs
  */
 import fs from "node:fs";
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -47,6 +48,20 @@ async function main() {
 
   fs.writeFileSync(path.join(resourcesDir, "icon.png"), square);
   console.log(`icon.png ${CANVAS}x${CANVAS}`);
+
+  if (process.platform === "darwin") {
+    const iconset = path.join(resourcesDir, "icon.iconset");
+    fs.mkdirSync(iconset, { recursive: true });
+    for (const size of [16, 32, 128, 256, 512]) {
+      for (const scale of [1, 2]) {
+        await sharp(square).resize(size * scale, size * scale).png()
+          .toFile(path.join(iconset, `icon_${size}x${size}${scale === 2 ? "@2x" : ""}.png`));
+      }
+    }
+    const result = spawnSync("/usr/bin/iconutil", ["-c", "icns", iconset, "-o", path.join(resourcesDir, "icon.icns")], { stdio: "inherit" });
+    if (result.status !== 0) throw new Error("macOS icon generation failed");
+    fs.rmSync(iconset, { recursive: true });
+  }
 
   const pngs = [];
   for (const size of SIZES) {

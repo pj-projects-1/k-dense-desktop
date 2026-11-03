@@ -226,7 +226,55 @@ function unzip(zipPath, destDir) {
   }
 }
 
+
+const MAC_UV = {
+  arm64: {
+    url: "https://files.pythonhosted.org/packages/2a/33/ef14dc7c9c4cfaf0c3a4aed5a298b76b5dea94c75b233f7620c49c9b2e09/uv-0.12.13-py3-none-macosx_11_0_arm64.whl",
+    sha256: "f86e5f02883c2e7a21bf522f4aa520c20d4f779d9a3368fbd6cdfe4a8f9549b5",
+  },
+  x64: {
+    url: "https://files.pythonhosted.org/packages/7b/e9/de1916ac6602c226838aa1eee1033ce68138427399c63f9b47a5a1fa3dba/uv-0.12.13-py3-none-macosx_10_12_x86_64.whl",
+    sha256: "ac7f135750b7419283029edb93453b4d41c7d7ff90f9b3860a6e474ddf98f016",
+  },
+};
+
+async function stageMac() {
+  const spec = MAC_UV[process.arch];
+  if (!spec) throw new Error(`Unsupported macOS architecture: ${process.arch}`);
+  fs.mkdirSync(outDir, { recursive: true });
+  const downloads = path.join(desktopRoot, "build", "downloads");
+  fs.mkdirSync(downloads, { recursive: true });
+  const archive = path.join(downloads, `uv-${process.arch}.zip`);
+  await download({ ...spec, name: `uv-${process.arch}.zip` }, archive);
+  // Verify cached downloads too; an interrupted or modified cache must fail.
+  const digest = createHash("sha256").update(fs.readFileSync(archive)).digest("hex");
+  if (digest !== spec.sha256) throw new Error("Cached macOS uv checksum mismatch; remove the archive and retry.");
+  const staging = path.join(outDir, ".uv-staging");
+  fs.rmSync(staging, { recursive: true, force: true });
+  try {
+    unzip(archive, staging);
+    const uv = findFile(staging, "uv");
+    if (!uv) throw new Error("uv missing from macOS wheel");
+    const dest = path.join(outDir, "uv");
+    fs.mkdirSync(dest, { recursive: true });
+    fs.copyFileSync(uv, path.join(dest, "uv"));
+    fs.chmodSync(path.join(dest, "uv"), 0o755);
+    // Retain the wheel's third-party licence notices alongside the binary.
+    for (const entry of fs.readdirSync(staging)) {
+      if (entry.endsWith(".dist-info")) fs.cpSync(path.join(staging, entry), path.join(dest, entry), { recursive: true });
+    }
+    fs.writeFileSync(path.join(dest, ".version"), `${UV.version} ${process.arch}\n${spec.url}\n${spec.sha256}\n`);
+    const bin = path.join(outDir, "bin");
+    fs.mkdirSync(bin, { recursive: true });
+    fs.writeFileSync(path.join(bin, "node"), '#!/bin/sh\n: "${KADY_NODE_EXECUTABLE:?Kady runtime is not configured}"\nexport ELECTRON_RUN_AS_NODE=1\nexec "$KADY_NODE_EXECUTABLE" "$@"\n', { mode: 0o755 });
+  } finally {
+    fs.rmSync(staging, { recursive: true, force: true });
+  }
+  console.log(`Staged macOS ${process.arch} uv and Node launcher. Git and Bash use the host.`);
+}
+
 async function main() {
+  if (process.platform === "darwin") return stageMac();
   if (process.platform !== "win32") {
     log("Externals bundling is Windows-only for now; skipping.");
     log("macOS/Linux rely on the system bash, git and uv.");
